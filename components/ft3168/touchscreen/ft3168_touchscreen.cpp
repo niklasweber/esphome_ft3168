@@ -16,7 +16,18 @@ bool FT3168Touchscreen::try_init_() {
   if (!this->read_byte(REG_DEVICE_ID, &this->device_id_)) {
     return false;
   }
-  ESP_LOGI(TAG, "FT3168 ready, device ID 0x%02X", this->device_id_);
+  // In monitor mode the chip briefly wakes up on its own to scan. Caught in that
+  // moment it answers but still returns empty registers (ID 0x00) and goes back
+  // to sleep right away, so only the real ID counts as ready.
+  if (this->device_id_ != DEVICE_ID_FT3168) {
+    return false;
+  }
+  if (!this->ever_initialized_) {
+    ESP_LOGI(TAG, "FT3168 ready, device ID 0x%02X", this->device_id_);
+    this->ever_initialized_ = true;
+  } else {
+    ESP_LOGV(TAG, "FT3168 woke up");
+  }
   return true;
 }
 
@@ -36,6 +47,7 @@ void FT3168Touchscreen::setup() {
   this->initialized_ = this->try_init_();
   if (!this->initialized_) {
     ESP_LOGW(TAG, "FT3168 not responding yet, will retry while polling");
+    this->status_set_warning();
   }
 }
 
@@ -43,20 +55,21 @@ void FT3168Touchscreen::update_touches() {
   if (!this->initialized_) {
     this->initialized_ = this->try_init_();
     if (!this->initialized_) {
+      // Before the first answer this is a real problem (the warning set in
+      // setup() stays); after it, the chip is just asleep until touched.
       return;
     }
+    this->status_clear_warning();
   }
 
   uint8_t fingers = 0;
   // Регистры читаются по одному байту: пакетное чтение этот чип не отдаёт.
   if (!this->read_byte(REG_TOUCH_NUM, &fingers)) {
-    this->read_errors_++;
-    this->status_set_warning();
-    // Возможно, чип потерял питание и вернулся в спящий режим.
+    // The chip is asleep (monitor mode, not touched) - not an error. try_init_()
+    // on the next poll sends the power mode again once it wakes up.
     this->initialized_ = false;
     return;
   }
-  this->status_clear_warning();
   this->last_fingers_ = fingers;
 
   if (fingers == 0 || fingers > 2) {
@@ -67,7 +80,7 @@ void FT3168Touchscreen::update_touches() {
   if (!this->read_byte(REG_XPOS_HIGH, &xh) || !this->read_byte(REG_XPOS_LOW, &xl) ||
       !this->read_byte(REG_YPOS_HIGH, &yh) || !this->read_byte(REG_YPOS_LOW, &yl)) {
     this->read_errors_++;
-    this->status_set_warning();
+    ESP_LOGD(TAG, "Coordinate read failed (chip fell asleep?)");
     return;
   }
 

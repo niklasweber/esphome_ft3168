@@ -19,6 +19,7 @@ static const uint8_t REG_XPOS_LOW = 0x04;
 static const uint8_t REG_YPOS_HIGH = 0x05;
 static const uint8_t REG_YPOS_LOW = 0x06;
 static const uint8_t REG_DEVICE_ID = 0xA0;   // 0x03 = FT3168
+static const uint8_t DEVICE_ID_FT3168 = 0x03;
 static const uint8_t REG_POWER_MODE = 0xA5;  // 0x01 = monitor mode
 
 class FT3168Touchscreen : public touchscreen::Touchscreen, public i2c::I2CDevice {
@@ -36,6 +37,10 @@ class FT3168Touchscreen : public touchscreen::Touchscreen, public i2c::I2CDevice
   bool try_init_();
 
   bool initialized_{false};
+  /// Whether the chip has answered at least once since boot. In monitor mode it
+  /// sleeps whenever it is not touched and does not answer on I2C, so after the
+  /// first answer a missing answer means "asleep", not a fault.
+  bool ever_initialized_{false};
   uint8_t device_id_{0xFF};
   uint8_t last_fingers_{0};
   uint16_t last_x_{0};
